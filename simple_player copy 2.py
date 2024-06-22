@@ -52,10 +52,22 @@ class MusicPlayer:
         self.current_music2_index = 0
         self.music2_paused_at = 0
 
-        self.playlist.bind('<<ListboxSelect>>', self.on_music_folder_select)
+        # Disable mouse selection events on the playlists
+        self.playlist.unbind('<<ListboxSelect>>')
+        self.playlist2.unbind('<<ListboxSelect>>')
 
         pygame.mixer.music.set_endevent(pygame.USEREVENT)
-        self.update_progress()
+        # Removed the problematic line and added check_pygame_events method call
+        self.check_pygame_events()
+
+        self.start_automatic_playback()
+
+    def check_pygame_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.USEREVENT:
+                self.handle_song_end()
+        # Call this method again after a short delay
+        self.root.after(100, self.check_pygame_events)
 
     def filter_keys(self, event):
         if event.keysym not in ('n', 'p', 'space', 'Return') and not event.char.isdigit():
@@ -66,12 +78,13 @@ class MusicPlayer:
         try:
             song_id = int(song_id) - 1
             if 0 <= song_id < len(self.music_files):
-                self.music2_paused_at = pygame.mixer.music.get_pos()
+                pygame.mixer.music.fadeout(500)
                 song_path = os.path.join(self.music_folder, self.music_files[song_id])
                 pygame.mixer.music.load(song_path)
-                pygame.mixer.music.play()
+                pygame.mixer.music.play(fade_ms=1000)
                 self.status_label.config(text=f"Now playing: {self.music_files[song_id]}")
                 self.update_progress_and_duration(song_path)
+                self.mode_label.config(text="Mode: Song Mode")
             else:
                 self.status_label.config(text="Invalid song ID")
         except ValueError:
@@ -80,42 +93,40 @@ class MusicPlayer:
             self.song_id_entry.delete(0, tk.END)
             self.song_id_entry.focus_set()
 
-    def on_music_folder_select(self, event):
-        selection = event.widget.curselection()
-        if selection:
-            index = selection[0]
-            song = self.music_files[index]
-            pygame.mixer.music.fadeout(500)
-            song_path = os.path.join(self.music_folder, song)
-            pygame.mixer.music.load(song_path)
-            pygame.mixer.music.play(fade_ms=1000)
-            self.mode_label.config(text="Mode: Song Mode")
-            self.status_label.config(text=f"Now playing: {song}")
-            self.update_progress_and_duration(song_path)
+    def start_automatic_playback(self):
+        if self.music_files2:
+            self.play_music2()
+
+    def play_music2(self):
+        song_path = os.path.join(self.music_folder2, self.music_files2[self.current_music2_index])
+        pygame.mixer.music.load(song_path)
+        pygame.mixer.music.play(fade_ms=1000)
+        pygame.mixer.music.set_endevent(pygame.USEREVENT)
+        self.status_label.config(text=f"Mix Mode: {self.music_files2[self.current_music2_index]}")
+        self.update_progress_and_duration(song_path)
+        self.current_music2_index = (self.current_music2_index + 1) % len(self.music_files2)
+
+    def handle_song_end(self):
+        if self.mode_label.cget("text") == "Mode: Song Mode":
+            self.play_music2()
 
     def update_progress_and_duration(self, song_path):
+        audio = MP3(song_path)
+        total_length = audio.info.length
+        playback_time = pygame.mixer.music.get_pos() / 1000
+        remaining_time = total_length - playback_time
+
+        self.progress['value'] = (playback_time / total_length) * 100
+
+        total_str = f"{int(total_length // 60)}:{int(total_length % 60):02d}"
+        remaining_str = f"{int(remaining_time // 60)}:{int(remaining_time % 60):02d}"
+        self.duration_label.config(text=f"{total_str}, {remaining_str}")
+
         if pygame.mixer.music.get_busy():
-            audio = MP3(song_path)
-            total_length = audio.info.length  # Total length of the song in seconds
-            playback_time = pygame.mixer.music.get_pos() / 1000  # Convert milliseconds to seconds
-            remaining_time = total_length - playback_time
-
-            # Update progress bar
-            self.progress['value'] = (playback_time / total_length) * 100
-
-            # Update duration label
-            total_str = f"{int(total_length // 60)}:{int(total_length % 60):02d}"
-            remaining_str = f"{int(remaining_time // 60)}:{int(remaining_time % 60):02d}"
-            self.duration_label.config(text=f"{total_str}, {remaining_str}")
-
             self.root.after(1000, lambda: self.update_progress_and_duration(song_path))
         else:
             self.progress['value'] = 0
             self.duration_label.config(text="00:00, 00:00")
-
-    def update_progress(self):
-        # This method is now replaced by update_progress_and_duration
-        pass
 
 if __name__ == "__main__":
     root = tk.Tk()
